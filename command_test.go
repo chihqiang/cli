@@ -172,12 +172,20 @@ func TestRunNoActionShowsHelp(t *testing.T) {
 func TestGlobalBeforeAfterHooks(t *testing.T) {
 	app := newCommandApp()
 	var order []string
-	app.Before = func(ctx context.Context, in *Input, out *Output) error {
+	key := struct{}{}
+	app.Before = func(ctx context.Context, in *Input, out *Output) (context.Context, error) {
 		order = append(order, "app-before")
-		return nil
+		// Assign a value to ctx; the updated context is forwarded to the subcommand
+		// and to the global After hook below.
+		ctx = context.WithValue(ctx, key, "from-before")
+		return ctx, nil
 	}
 	app.After = func(ctx context.Context, in *Input, out *Output) error {
 		order = append(order, "app-after")
+		// The After hook receives the context assigned in Before.
+		if v, _ := ctx.Value(key).(string); v != "from-before" {
+			t.Errorf("after ctx value = %q, want %q", v, "from-before")
+		}
 		return nil
 	}
 	_, _, err := runApp(app, "greet")
@@ -197,9 +205,9 @@ func TestCommandBeforeAfterOrder(t *testing.T) {
 	app.Subcommands = []*Command{
 		{
 			Name: "sub",
-			Before: func(ctx context.Context, in *Input, out *Output) error {
+			Before: func(ctx context.Context, in *Input, out *Output) (context.Context, error) {
 				order = append(order, "before")
-				return nil
+				return ctx, nil
 			},
 			Action: func(ctx context.Context, in *Input, out *Output) error {
 				order = append(order, "action")
@@ -228,8 +236,8 @@ func TestBeforeErrorAborts(t *testing.T) {
 		called = true
 		return nil
 	}
-	app.Before = func(ctx context.Context, in *Input, out *Output) error {
-		return &ExitError{Code: 3, Err: errors.New("boom")}
+	app.Before = func(ctx context.Context, in *Input, out *Output) (context.Context, error) {
+		return ctx, &ExitError{Code: 3, Err: errors.New("boom")}
 	}
 	_, _, err := runApp(app)
 	var ee *ExitError
@@ -238,6 +246,55 @@ func TestBeforeErrorAborts(t *testing.T) {
 	}
 	if called {
 		t.Error("action should not run after before error")
+	}
+}
+
+func TestBeforeContextPropagates(t *testing.T) {
+	app := New()
+	app.Name = "prog"
+	key := struct{}{}
+	app.Before = func(ctx context.Context, in *Input, out *Output) (context.Context, error) {
+		return context.WithValue(ctx, key, "from-before"), nil
+	}
+	var got string
+	app.Action = func(ctx context.Context, in *Input, out *Output) error {
+		got, _ = ctx.Value(key).(string)
+		return nil
+	}
+	_, _, err := runApp(app)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if got != "from-before" {
+		t.Errorf("action ctx value = %q, want %q", got, "from-before")
+	}
+}
+
+func TestGlobalBeforeContextVisibleToSubcommand(t *testing.T) {
+	app := New()
+	app.Name = "prog"
+	key := struct{}{}
+	app.Before = func(ctx context.Context, in *Input, out *Output) (context.Context, error) {
+		// Define a value on ctx in the global Before hook.
+		return context.WithValue(ctx, key, "global-before"), nil
+	}
+	var got string
+	app.Subcommands = []*Command{
+		{
+			Name: "sub",
+			Action: func(ctx context.Context, in *Input, out *Output) error {
+				// The subcommand's Action can see the value defined in the global Before hook.
+				got, _ = ctx.Value(key).(string)
+				return nil
+			},
+		},
+	}
+	_, _, err := runApp(app, "sub")
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if got != "global-before" {
+		t.Errorf("subcommand action ctx value = %q, want %q", got, "global-before")
 	}
 }
 

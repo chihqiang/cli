@@ -12,7 +12,11 @@ import (
 // ActionFunc is the command execution function: context, input (args+flags), output (logging/table/ask).
 type ActionFunc func(context.Context, *Input, *Output) error
 
-// HookFunc is a Before/After hook function with the same signature as Action.
+// BeforeFunc is a hook function run before Action. It may derive a new context and
+// return it; the updated context is passed to Action/After and subsequent hooks.
+type BeforeFunc func(context.Context, *Input, *Output) (context.Context, error)
+
+// HookFunc is the After hook function with the same signature as Action.
 type HookFunc func(context.Context, *Input, *Output) error
 
 // CommandNotFoundFunc handles a command that was not found.
@@ -36,7 +40,7 @@ type Command struct {
 	// Behavior
 	Flags           []Flag              // Flags defined by this command
 	Subcommands     []*Command          // List of subcommands
-	Before          HookFunc            // Hook run before execution (invoked before a subcommand runs)
+	Before          BeforeFunc          // Hook run before execution; may return an updated context
 	After           HookFunc            // Hook run after execution (invoked after a subcommand runs)
 	Action          ActionFunc          // Command execution function
 	CommandNotFound CommandNotFoundFunc // Handler for when a command is not found
@@ -108,8 +112,10 @@ func (c *Command) run(ctx context.Context, args []string) error {
 	}
 
 	// Global (root) Before hook; runs only once for the whole invocation.
+	// The context it returns is used for the rest of the run.
 	if c.app == c && c.Before != nil {
-		if err := c.Before(ctx, c.newInput(rest), c.output()); err != nil {
+		var err error
+		if ctx, err = c.Before(ctx, c.newInput(rest), c.output()); err != nil {
 			return err
 		}
 	}
@@ -157,10 +163,12 @@ func (c *Command) finish(ctx context.Context, rest []string, err error) error {
 	return err
 }
 
-// execute runs Before / Action / After in order.
+// execute runs Before / Action / After in order. The context returned by Before is
+// passed to Action and After.
 func (c *Command) execute(ctx context.Context, in *Input, out *Output) error {
 	if c.Before != nil {
-		if err := c.Before(ctx, in, out); err != nil {
+		var err error
+		if ctx, err = c.Before(ctx, in, out); err != nil {
 			return err
 		}
 	}

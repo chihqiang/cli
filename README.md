@@ -99,7 +99,7 @@ $ go run . --help           # auto-generated help
 | `Hidden` | Hidden in help, but still directly invocable |
 | `Version` | Root command version; enables `--version/-v` |
 | `Flags` / `Subcommands` | Flag list and subcommands |
-| `Before` / `After` | Hooks before/after execution (defined on a subcommand they run with it; defined on the root they run once per invocation) |
+| `Before` / `After` | Hooks before/after execution (defined on a subcommand they run with it; defined on the root they run once per invocation). `Before` may return an updated context used by `Action` / `After` |
 | `Action` | Command execution function `func(ctx, *Input, *Output) error` |
 | `CommandNotFound` | Handler for when a subcommand is not matched |
 | `VersionPrinter` | Custom version printing function |
@@ -261,6 +261,7 @@ The `example/` directory contains complete runnable examples:
 | `table` | multi-style table rendering |
 | `logging` | leveled logging and level control |
 | `invoke` | three ways to call command B from inside command A |
+| `context` | passing values through context across the command tree |
 
 ```sh
 go run ./example/hello greet Alice --shout
@@ -270,6 +271,7 @@ go run ./example/table box
 go run ./example/ask survey
 go run ./example/logging --verbose demo
 go run ./example/invoke deploy --env prod
+go run ./example/context --user alice run
 ```
 
 ## Testing
