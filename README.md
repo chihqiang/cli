@@ -153,6 +153,16 @@ command line > environment variable (Sources) > default value (Value)
 }
 ```
 
+The priority is applied across the whole command chain, which matters when the same flag
+is declared on both a parent and a subcommand (the common "global flags" pattern):
+
+- a value set on the command line at **any** level wins over a `Sources` value at any level
+- a `Sources` value at **any** level wins over a default `Value`
+- within the same priority, the nearest command (the executing one) wins
+
+So `app --host x run` is not shadowed by a subcommand's environment fallback, and a
+parent's environment value is not masked by a subcommand's default value.
+
 ### Parsing rules
 
 - `--name value` / `--name=value` / `-n value` / `-n=value` are all supported
@@ -234,6 +244,20 @@ if in.String("token") == "" {
 // Typed errors
 var ue *cli.UsageError    // usage error (unknown option, missing required flag, etc.)
 var nf *cli.NotFoundError // help topic/command does not exist
+```
+
+`Run` only **returns** errors; it does not print them. Always render the error and choose
+the exit code in `main`, otherwise a mistyped flag exits silently:
+
+```go
+if err := app.Run(context.Background(), os.Args); err != nil {
+	fmt.Fprintln(os.Stderr, err)
+	var ue *cli.UsageError
+	if errors.As(err, &ue) {
+		fmt.Fprintln(os.Stderr, "Run '"+os.Args[0]+" --help' for usage.")
+	}
+	os.Exit(1)
+}
 ```
 
 ## Builtin commands and flags

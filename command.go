@@ -50,7 +50,9 @@ type Command struct {
 	app          *Command               // Root command
 	parent       *Command               // Parent command
 	values       map[string]interface{} // Flag name -> underlying value (*singleValue / *sliceValue / *boolValue)
-	setFlags     map[string]bool        // Set of flag names explicitly set
+	setFlags     map[string]bool        // Set of flag names explicitly set (command line or value source)
+	cliFlags     map[string]bool        // Set of flag names supplied on the command line
+	sourceFlags  map[string]bool        // Set of flag names resolved from a value source (Sources)
 	builtinFlags []Flag                 // Automatically registered global builtin flags (--verbose/--quiet/--no-interaction)
 	out          *Output                // Shared output object
 	interactive  bool                   // Whether interactive Q&A is allowed
@@ -286,6 +288,8 @@ func programName() string {
 func (c *Command) parse(args []string) ([]string, error) {
 	c.values = map[string]interface{}{}
 	c.setFlags = map[string]bool{}
+	c.cliFlags = map[string]bool{}
+	c.sourceFlags = map[string]bool{}
 	defs := map[string]*flagDef{}
 
 	register := func(names []string, val flag.Value) {
@@ -319,6 +323,18 @@ func (c *Command) parse(args []string) ([]string, error) {
 		return nil, err
 	}
 
+	// Record command-line origin under every alias of a set flag, so lookups are
+	// independent of whether the user typed the primary name or an alias.
+	for _, f := range c.allFlags() {
+		if !c.flagSetAny(f.Names()) {
+			continue
+		}
+		for _, n := range f.Names() {
+			c.cliFlags[n] = true
+			c.setFlags[n] = true
+		}
+	}
+
 	// Value source fallback: when a flag is not explicitly set, try its declared ValueSource in order.
 	for _, f := range c.allFlags() {
 		if c.flagSetAny(f.Names()) {
@@ -331,7 +347,10 @@ func (c *Command) parse(args []string) ([]string, error) {
 		if v, ok := src.Lookup(); ok {
 			if def, ok := defs[f.Names()[0]]; ok {
 				_ = def.value.Set(v)
-				c.setFlags[f.Names()[0]] = true
+				for _, n := range f.Names() {
+					c.setFlags[n] = true
+					c.sourceFlags[n] = true
+				}
 			}
 		}
 	}

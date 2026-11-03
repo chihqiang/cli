@@ -14,6 +14,9 @@ import (
 // A flag may declare a value source (Sources); at runtime the first hit wins by priority:
 // command line > Sources > default value (Value). The builtin implementation is EnvVars;
 // custom implementations are also supported.
+//
+// The priority applies across the command chain: a command-line value at any level beats
+// a Sources value at any level, and within the same priority the nearest command wins.
 type ValueSource interface {
 	// Lookup returns the value provided by this source; returns empty string and false when not found.
 	Lookup() (string, bool)
