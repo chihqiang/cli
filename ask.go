@@ -437,12 +437,12 @@ func (a *Ask) writePrompt() {
 		choice := a.choice()
 		width := 0
 		for k := range choice.choices {
-			if len(k) > width {
-				width = len(k)
+			if w := stringWidth(k); w > width {
+				width = w
 			}
 		}
 		for _, k := range sortedKeys(choice.choices) {
-			a.out.rawf("  [%-*s] %s", width, k, choice.choices[k])
+			a.out.rawf("  [%s] %s", pad(k, width, AlignLeft), choice.choices[k])
 		}
 	}
 

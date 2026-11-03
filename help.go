@@ -85,7 +85,7 @@ func (c *Command) renderAppHelp(out *Output) error {
 			if len(sub.Aliases) > 0 {
 				name += ", " + strings.Join(sub.Aliases, ", ")
 			}
-			out.rawf("   %-*s  %s", width, name, sub.Usage)
+			out.rawf("   %s  %s", pad(name, width, AlignLeft), sub.Usage)
 		}
 	}
 
@@ -183,6 +183,6 @@ func (c *Command) renderFlags(out *Output, flags []Flag, global bool) {
 		}
 	}
 	for _, e := range entries {
-		out.rawf("   %-*s  %s", width, e.names, e.usage)
+		out.rawf("   %s  %s", pad(e.names, width, AlignLeft), e.usage)
 	}
 }
