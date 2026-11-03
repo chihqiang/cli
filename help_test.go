@@ -165,6 +165,34 @@ func TestRenderFlagsHiddenAndAliases(t *testing.T) {
 	}
 }
 
+func TestShowHelpAlignsWideCommandNames(t *testing.T) {
+	app := New()
+	app.Name = "prog"
+	app.Usage = "app"
+	app.Subcommands = []*Command{
+		{Name: "中文", Usage: "wide usage"},
+		{Name: "ab", Usage: "ascii usage"},
+	}
+	stdout, _, err := runApp(app, "--help")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	cols := make([]int, 0, 2)
+	for _, line := range strings.Split(stdout, "\n") {
+		for _, usage := range []string{"wide usage", "ascii usage"} {
+			if i := strings.Index(line, usage); i >= 0 {
+				cols = append(cols, stringWidth(line[:i]))
+			}
+		}
+	}
+	if len(cols) != 2 {
+		t.Fatalf("expected 2 command lines, got %d:\n%s", len(cols), stdout)
+	}
+	if cols[0] != cols[1] {
+		t.Errorf("usage columns not aligned: %v\n%s", cols, stdout)
+	}
+}
+
 func TestShowHelpCommandHelpViaRunHelp(t *testing.T) {
 	app := New()
 	app.Name = "prog"

@@ -177,6 +177,31 @@ func TestChoicePromptAndErrorMsg(t *testing.T) {
 	}
 }
 
+func TestChoicePromptAlignsWideKeys(t *testing.T) {
+	o, out, _ := newBufOutput()
+	c := NewChoice("pick", map[string]string{"中文": "wide", "ab": "ascii"}, "ab")
+	a := NewAsk(o, c)
+	a.writePrompt()
+
+	cols := make([]int, 0, 2)
+	for _, line := range strings.Split(out.String(), "\n") {
+		if !strings.HasPrefix(line, "  [") {
+			continue
+		}
+		for _, label := range []string{"wide", "ascii"} {
+			if i := strings.Index(line, label); i >= 0 {
+				cols = append(cols, stringWidth(line[:i]))
+			}
+		}
+	}
+	if len(cols) != 2 {
+		t.Fatalf("expected 2 choice lines, got %d:\n%s", len(cols), out.String())
+	}
+	if cols[0] != cols[1] {
+		t.Errorf("choice labels not aligned: %v\n%s", cols, out.String())
+	}
+}
+
 func TestAskRunWithStdinMultiQuestions(t *testing.T) {
 	app := New()
 	app.Name = "prog"

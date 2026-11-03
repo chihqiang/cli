@@ -198,6 +198,53 @@ func TestGlobalBeforeAfterHooks(t *testing.T) {
 	}
 }
 
+func TestRootHooksRunOnceWithRootAction(t *testing.T) {
+	app := New()
+	app.Name = "prog"
+	var order []string
+	app.Before = func(ctx context.Context, in *Input, out *Output) (context.Context, error) {
+		order = append(order, "before")
+		return ctx, nil
+	}
+	app.Action = func(ctx context.Context, in *Input, out *Output) error {
+		order = append(order, "action")
+		return nil
+	}
+	app.After = func(ctx context.Context, in *Input, out *Output) error {
+		order = append(order, "after")
+		return nil
+	}
+	if _, _, err := runApp(app); err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if got := strings.Join(order, ","); got != "before,action,after" {
+		t.Errorf("hook order = %v, want [before action after]", order)
+	}
+}
+
+func TestDirectSubcommandRunRunsHooksOnce(t *testing.T) {
+	sub := &Command{Name: "sub"}
+	var order []string
+	sub.Before = func(ctx context.Context, in *Input, out *Output) (context.Context, error) {
+		order = append(order, "before")
+		return ctx, nil
+	}
+	sub.Action = func(ctx context.Context, in *Input, out *Output) error {
+		order = append(order, "action")
+		return nil
+	}
+	sub.After = func(ctx context.Context, in *Input, out *Output) error {
+		order = append(order, "after")
+		return nil
+	}
+	if err := sub.Run(context.Background(), []string{"sub"}); err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if got := strings.Join(order, ","); got != "before,action,after" {
+		t.Errorf("hook order = %v, want [before action after]", order)
+	}
+}
+
 func TestCommandBeforeAfterOrder(t *testing.T) {
 	app := New()
 	app.Name = "prog"

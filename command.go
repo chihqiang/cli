@@ -147,6 +147,11 @@ func (c *Command) run(ctx context.Context, args []string) error {
 
 	// No subcommand: execute the current command.
 	if c.Action != nil {
+		// For the root command, Before/After are already managed once per invocation
+		// by run/finish; running execute here would invoke them a second time.
+		if c.app == c {
+			return c.finish(ctx, rest, c.Action(ctx, c.newInput(rest), c.output()))
+		}
 		return c.finish(ctx, rest, c.execute(ctx, c.newInput(rest), c.output()))
 	}
 	// A command without an Action (e.g. a root App used only as a command group) shows help by default.
@@ -251,7 +256,7 @@ func (c *Command) setupGlobalFlags() {
 		c.builtinFlags = append(c.builtinFlags, &BoolFlag{Name: "verbose", Usage: "enable verbose output"})
 	}
 	if !c.hasFlag("quiet") {
-		c.builtinFlags = append(c.builtinFlags, &BoolFlag{Name: "quiet", Usage: "suppress all output"})
+		c.builtinFlags = append(c.builtinFlags, &BoolFlag{Name: "quiet", Usage: "suppress info and success output"})
 	}
 	if !c.hasFlag("no-interaction") {
 		c.builtinFlags = append(c.builtinFlags, &BoolFlag{Name: "no-interaction", Usage: "do not ask any interactive question"})
