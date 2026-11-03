@@ -2,6 +2,7 @@
 //
 // Run: go run ./example/ask survey
 // Non-interactive (piped) answers: printf 'Zhang\n25\nsecret\ny\npy\n' | go run ./example/ask survey
+// Non-interactive by flag: go run ./example/ask survey --no-interaction   (globals work after the command too)
 package main
 
 import (

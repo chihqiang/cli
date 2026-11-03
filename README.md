@@ -284,6 +284,7 @@ The `example/` directory contains complete runnable examples:
 | `hello` | minimal intro: command, argument, flag |
 | `commands` | command organization & help: grouping, hidden commands, `CommandNotFound` |
 | `flags` | every flag type and value sources |
+| `globalflags` | global vs local flags: same flag on root + subcommand, Sources, required validation, typed values |
 | `ask` | interactive Q&A (including feeding answers via a pipe) |
 | `table` | multi-style table rendering |
 | `logging` | leveled logging and level control |
@@ -294,6 +295,9 @@ The `example/` directory contains complete runnable examples:
 go run ./example/hello greet Alice --shout
 go run ./example/commands --help
 go run ./example/flags --token abc --tags a --tags b
+DEMO_TOKEN=from-env go run ./example/globalflags run --host es:9200 --retries 3
+DEMO_TOKEN=from-env go run ./example/globalflags run --verbose
+go run ./example/globalflags run --help
 go run ./example/table box
 go run ./example/ask survey
 go run ./example/logging --verbose demo

@@ -3,7 +3,9 @@
 // Run: go run ./example/logging demo              → base level
 //
 //	go run ./example/logging --verbose demo    → additionally prints Verbose/Debug
+//	go run ./example/logging demo --verbose    → global flags also work after the command
 //	go run ./example/logging --quiet demo      → only Warn/Error remain
+//	go run ./example/logging demo --quiet      → same, with the global flag after the command
 package main
 
 import (
