@@ -25,6 +25,8 @@ type Output struct {
 	stderr    io.Writer
 	root      *Command      // Root command reference, for Q&A interactivity checks and injectable stdin
 	bufReader *bufio.Reader // Persistent buffered reader for Q&A (shared across consecutive questions to avoid losing data)
+
+	noInteraction bool // Set when --no-interaction is parsed at any command level
 }
 
 // NewOutput creates an output object writing to stdout/stderr. Color detection is delegated to fatih/color.
@@ -198,6 +200,9 @@ func (o *Output) bufioReader() *bufio.Reader {
 // isInteractive reports whether interactive Q&A is allowed; it is false with
 // --no-interaction or when stdin is not a terminal.
 func (o *Output) isInteractive() bool {
+	if o.noInteraction {
+		return false
+	}
 	if o.root != nil {
 		if bv, ok := o.root.values["no-interaction"].(*boolValue); ok && bv.val {
 			return false

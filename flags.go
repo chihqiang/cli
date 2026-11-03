@@ -62,6 +62,8 @@ type Flag interface {
 	source() ValueSource
 	// isHidden reports whether the flag is hidden in help.
 	isHidden() bool
+	// validateValue reports whether raw is a valid textual value for this flag type.
+	validateValue(raw string) error
 	// usage returns the usage text, including default value and value source.
 	usage() string
 	// register registers the flag's underlying value with the command.
@@ -180,6 +182,7 @@ func (f StringFlag) register(reg func([]string, flag.Value)) error {
 	reg(f.Names(), &singleValue{val: f.Value})
 	return nil
 }
+func (f StringFlag) validateValue(string) error { return nil }
 
 // IntFlag is an integer flag.
 type IntFlag struct {
@@ -205,6 +208,10 @@ func (f IntFlag) usage() string       { return f.common().usageText(f.Value) }
 func (f IntFlag) register(reg func([]string, flag.Value)) error {
 	reg(f.Names(), &singleValue{val: strconv.Itoa(f.Value)})
 	return nil
+}
+func (f IntFlag) validateValue(raw string) error {
+	_, err := strconv.Atoi(raw)
+	return err
 }
 
 // Int64Flag is a 64-bit integer flag.
@@ -232,6 +239,10 @@ func (f Int64Flag) register(reg func([]string, flag.Value)) error {
 	reg(f.Names(), &singleValue{val: strconv.FormatInt(f.Value, 10)})
 	return nil
 }
+func (f Int64Flag) validateValue(raw string) error {
+	_, err := strconv.ParseInt(raw, 10, 64)
+	return err
+}
 
 // UintFlag is an unsigned integer flag.
 type UintFlag struct {
@@ -257,6 +268,10 @@ func (f UintFlag) usage() string       { return f.common().usageText(f.Value) }
 func (f UintFlag) register(reg func([]string, flag.Value)) error {
 	reg(f.Names(), &singleValue{val: strconv.FormatUint(uint64(f.Value), 10)})
 	return nil
+}
+func (f UintFlag) validateValue(raw string) error {
+	_, err := strconv.ParseUint(raw, 10, 64)
+	return err
 }
 
 // Float64Flag is a floating-point flag.
@@ -284,6 +299,10 @@ func (f Float64Flag) register(reg func([]string, flag.Value)) error {
 	reg(f.Names(), &singleValue{val: strconv.FormatFloat(f.Value, 'g', -1, 64)})
 	return nil
 }
+func (f Float64Flag) validateValue(raw string) error {
+	_, err := strconv.ParseFloat(raw, 64)
+	return err
+}
 
 // BoolFlag is a boolean switch flag.
 type BoolFlag struct {
@@ -310,6 +329,7 @@ func (f BoolFlag) register(reg func([]string, flag.Value)) error {
 	reg(f.Names(), &boolValue{val: f.Value})
 	return nil
 }
+func (f BoolFlag) validateValue(string) error { return nil }
 
 // DurationFlag is a time duration flag.
 type DurationFlag struct {
@@ -335,6 +355,10 @@ func (f DurationFlag) usage() string       { return f.common().usageText(f.Value
 func (f DurationFlag) register(reg func([]string, flag.Value)) error {
 	reg(f.Names(), &singleValue{val: f.Value.String()})
 	return nil
+}
+func (f DurationFlag) validateValue(raw string) error {
+	_, err := time.ParseDuration(raw)
+	return err
 }
 
 // StringSliceFlag is a string slice flag (repeatable).
@@ -362,6 +386,7 @@ func (f StringSliceFlag) register(reg func([]string, flag.Value)) error {
 	reg(f.Names(), &sliceValue{vals: append([]string{}, f.Value...)})
 	return nil
 }
+func (f StringSliceFlag) validateValue(string) error { return nil }
 
 // IntSliceFlag is an integer slice flag.
 type IntSliceFlag struct {
@@ -391,6 +416,10 @@ func (f IntSliceFlag) register(reg func([]string, flag.Value)) error {
 	}
 	reg(f.Names(), &sliceValue{vals: vals})
 	return nil
+}
+func (f IntSliceFlag) validateValue(raw string) error {
+	_, err := strconv.Atoi(raw)
+	return err
 }
 
 // Float64SliceFlag is a floating-point slice flag.
@@ -422,6 +451,10 @@ func (f Float64SliceFlag) register(reg func([]string, flag.Value)) error {
 	reg(f.Names(), &sliceValue{vals: vals})
 	return nil
 }
+func (f Float64SliceFlag) validateValue(raw string) error {
+	_, err := strconv.ParseFloat(raw, 64)
+	return err
+}
 
 // GenericFlag is a generic flag that allows a custom flag.Value implementation.
 type GenericFlag struct {
@@ -451,3 +484,4 @@ func (f GenericFlag) register(reg func([]string, flag.Value)) error {
 	reg(f.Names(), f.Value)
 	return nil
 }
+func (f GenericFlag) validateValue(string) error { return nil }

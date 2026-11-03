@@ -12,7 +12,7 @@ An embeddable Go command-line component library: command trees, hooks, interacti
 ## Features
 
 - **Command tree**: the root command (App) and subcommands are the same type, with nested subcommands, aliases, and hidden commands
-- **Out of the box**: automatically registers `--help/-h`, `--verbose`, `--quiet`, `--no-interaction`; setting `Version` automatically enables `--version/-v`
+- **Out of the box**: automatically registers `--help/-h`, `--verbose`, `--quiet`, `--no-interaction` on every command (before or after the subcommand name); setting `Version` automatically enables `--version/-v`
 - **Hooks**: global/command-level `Before` / `After` hooks, plus `CommandNotFound` for custom unmatched-command handling
 - **Rich flag types**: string, integer, float, bool, duration, slices (repeatable/comma-separated), and generic custom types
 - **Value source fallback**: command line > environment variable > default value (`Sources: cli.EnvVars("APP_LANG")`)
@@ -168,6 +168,9 @@ parent's environment value is not masked by a subcommand's default value.
 - `--name value` / `--name=value` / `-n value` / `-n=value` are all supported
 - Positional arguments and flags can be interleaved (commands with subcommands stop parsing flags after the first positional argument, for subcommand dispatch)
 - Everything after `--` is treated as positional arguments
+- Typed flags validate their values (including values from `Sources`): `--count abc` is a usage error instead of silently reading as `0`
+- `--verbose`, `--quiet` and `--no-interaction` are inherited by every subcommand, so they can be placed before or after the subcommand name
+- Required flags are validated when the executing command's `Action` runs. A flag declared on both a parent and a subcommand is satisfied at either position, so `app run --token x` works
 
 ## Logging
 
@@ -268,9 +271,9 @@ if err := app.Run(context.Background(), os.Args); err != nil {
 | `--version` / `-v` | print the version (only after `Version` is set) |
 | `help [command]` | builtin help subcommand |
 | `version` | builtin version subcommand |
-| `--verbose` | debug-level output |
-| `--quiet` | suppress normal output |
-| `--no-interaction` | disable interactive Q&A |
+| `--verbose` | debug-level output (usable before or after the subcommand name) |
+| `--quiet` | suppress normal output (usable before or after the subcommand name) |
+| `--no-interaction` | disable interactive Q&A (usable before or after the subcommand name) |
 
 ## Examples
 
