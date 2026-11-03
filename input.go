@@ -85,7 +85,24 @@ func (in *Input) NArg() int { return len(in.args) }
 
 // lookup finds a flag's underlying value by walking up from the current command
 // (along the parent chain).
+//
+// Values are resolved across the whole command chain with a single priority order:
+// command line > Sources > default value. Within the same priority the nearest
+// command (the executing one) wins. This keeps a flag declared on both a parent and
+// a subcommand consistent: an explicit parent flag is not shadowed by a subcommand's
+// environment fallback, and a parent's environment value is not shadowed by a
+// subcommand's default value.
 func (in *Input) lookup(name string) (interface{}, bool) {
+	for cmd := in.cmd; cmd != nil; cmd = cmd.parent {
+		if v, ok := cmd.values[name]; ok && cmd.cliFlags[name] {
+			return v, true
+		}
+	}
+	for cmd := in.cmd; cmd != nil; cmd = cmd.parent {
+		if v, ok := cmd.values[name]; ok && cmd.sourceFlags[name] {
+			return v, true
+		}
+	}
 	for cmd := in.cmd; cmd != nil; cmd = cmd.parent {
 		if v, ok := cmd.values[name]; ok {
 			return v, true

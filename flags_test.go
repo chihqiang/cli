@@ -271,3 +271,120 @@ func TestStringFlagSourceAndHidden(t *testing.T) {
 		t.Errorf("source = %q", src.String())
 	}
 }
+
+func TestSubcommandFlagUsesValueSource(t *testing.T) {
+	t.Setenv("CLI_TEST_HOST", "http://es:9200")
+	global := []Flag{&StringFlag{Name: "host", Value: "http://127.0.0.1:9200", Sources: EnvVars("CLI_TEST_HOST")}}
+
+	sub := &Command{Name: "run", Flags: append([]Flag{}, global...)}
+	sub.Action = func(ctx context.Context, in *Input, out *Output) error {
+		if got := in.String("host"); got != "http://es:9200" {
+			t.Errorf("subcommand host = %q, want env value", got)
+		}
+		return nil
+	}
+	app := &Command{Name: "demo", Flags: append([]Flag{}, global...), Subcommands: []*Command{sub}}
+	if _, _, err := runApp(app, "run"); err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	subOnly := &Command{Name: "run", Flags: append([]Flag{}, global...)}
+	subOnly.Action = func(ctx context.Context, in *Input, out *Output) error {
+		if got := in.String("host"); got != "http://es:9200" {
+			t.Errorf("subcommand-only host = %q, want env value", got)
+		}
+		return nil
+	}
+	appOnly := &Command{Name: "demo", Subcommands: []*Command{subOnly}}
+	if _, _, err := runApp(appOnly, "run"); err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+}
+
+func TestFlagPriorityAcrossCommandTree(t *testing.T) {
+	t.Setenv("CLI_TEST_HOST", "http://env:9200")
+	source := func() Flag {
+		return &StringFlag{Name: "host", Value: "http://default:9200", Sources: EnvVars("CLI_TEST_HOST")}
+	}
+
+	tests := []struct {
+		name string
+		root []Flag
+		sub  []Flag
+		args []string
+		want string
+	}{
+		{
+			name: "root command line beats subcommand source",
+			root: []Flag{source()},
+			sub:  []Flag{source()},
+			args: []string{"--host", "http://cli:9200", "run"},
+			want: "http://cli:9200",
+		},
+		{
+			name: "subcommand command line beats root source",
+			root: []Flag{source()},
+			sub:  []Flag{source()},
+			args: []string{"run", "--host", "http://cli:9200"},
+			want: "http://cli:9200",
+		},
+		{
+			name: "parent source beats subcommand default",
+			root: []Flag{source()},
+			sub:  []Flag{&StringFlag{Name: "host", Value: "http://local:9200"}},
+			args: []string{"run"},
+			want: "http://env:9200",
+		},
+		{
+			name: "subcommand source beats root default",
+			root: []Flag{&StringFlag{Name: "host", Value: "http://root:9200"}},
+			sub:  []Flag{source()},
+			args: []string{"run"},
+			want: "http://env:9200",
+		},
+		{
+			name: "default falls back to nearest declaration",
+			root: []Flag{&StringFlag{Name: "host", Value: "http://root:9200"}},
+			sub:  []Flag{&StringFlag{Name: "host", Value: "http://local:9200"}},
+			args: []string{"run"},
+			want: "http://local:9200",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got string
+			sub := &Command{Name: "run", Flags: tt.sub}
+			sub.Action = func(ctx context.Context, in *Input, out *Output) error {
+				got = in.String("host")
+				return nil
+			}
+			app := &Command{Name: "demo", Flags: tt.root, Subcommands: []*Command{sub}}
+			if _, _, err := runApp(app, tt.args...); err != nil {
+				t.Fatalf("run failed: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("host = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFlagSourceAliasesMarkedSet(t *testing.T) {
+	t.Setenv("CLI_TEST_LANG", "zh")
+	app := New()
+	app.Name = "prog"
+	app.Flags = []Flag{&StringFlag{Name: "lang", Aliases: []string{"l"}, Sources: EnvVars("CLI_TEST_LANG")}}
+	var setByName, setByAlias bool
+	app.Action = func(ctx context.Context, in *Input, out *Output) error {
+		setByName = in.IsSet("lang")
+		setByAlias = in.IsSet("l")
+		return nil
+	}
+	if _, _, err := runApp(app); err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if !setByName || !setByAlias {
+		t.Errorf("IsSet by name = %v, by alias = %v; want both true", setByName, setByAlias)
+	}
+}
