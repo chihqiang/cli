@@ -467,3 +467,228 @@ func TestOutputExistingInstanceReused(t *testing.T) {
 		t.Error("subcommand should reuse app output")
 	}
 }
+
+func TestGlobalFlagsWorkAfterSubcommand(t *testing.T) {
+	app := New()
+	app.Name = "prog"
+	app.Stdin = strings.NewReader("")
+	app.Subcommands = []*Command{{
+		Name: "run",
+		Action: func(ctx context.Context, in *Input, out *Output) error {
+			out.Info("info line")
+			out.Debug("debug line")
+			if in.IsInteractive() {
+				t.Error("--no-interaction after subcommand did not take effect")
+			}
+			ans, err := out.AskString("name?", "fallback")
+			if err != nil {
+				t.Errorf("AskString returned an error: %v", err)
+			}
+			if ans != "fallback" {
+				t.Errorf("AskString = %q, want default", ans)
+			}
+			return nil
+		},
+	}}
+
+	stdout, _, err := runApp(app, "run", "--verbose", "--no-interaction")
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if !strings.Contains(stdout, "debug line") {
+		t.Errorf("--verbose after subcommand not applied:\n%s", stdout)
+	}
+
+	quietApp := New()
+	quietApp.Name = "prog"
+	quietApp.Subcommands = []*Command{{
+		Name: "run",
+		Action: func(ctx context.Context, in *Input, out *Output) error {
+			out.Info("info line")
+			return nil
+		},
+	}}
+	stdout, _, err = runApp(quietApp, "run", "--quiet")
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if strings.Contains(stdout, "info line") {
+		t.Errorf("--quiet after subcommand not applied:\n%s", stdout)
+	}
+}
+
+func TestGlobalFlagsWorkOnNestedSubcommands(t *testing.T) {
+	app := New()
+	app.Name = "prog"
+	app.Subcommands = []*Command{{
+		Name: "group",
+		Subcommands: []*Command{{
+			Name: "leaf",
+			Action: func(ctx context.Context, in *Input, out *Output) error {
+				out.Debug("nested debug")
+				return nil
+			},
+		}},
+	}}
+	stdout, _, err := runApp(app, "group", "leaf", "--verbose")
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if !strings.Contains(stdout, "nested debug") {
+		t.Errorf("--verbose not applied to nested subcommand:\n%s", stdout)
+	}
+}
+
+func TestRequiredFlagSatisfiedAfterSubcommand(t *testing.T) {
+	app := &Command{
+		Name:  "demo",
+		Flags: []Flag{&StringFlag{Name: "token", Required: true}},
+		Subcommands: []*Command{{
+			Name:  "run",
+			Flags: []Flag{&StringFlag{Name: "token", Required: true}},
+			Action: func(ctx context.Context, in *Input, out *Output) error {
+				if got := in.String("token"); got != "abc" {
+					t.Errorf("token = %q, want abc", got)
+				}
+				return nil
+			},
+		}},
+	}
+	if _, _, err := runApp(app, "run", "--token", "abc"); err != nil {
+		t.Fatalf("required flag after subcommand should be accepted: %v", err)
+	}
+
+	_, _, err := runApp(app, "run")
+	var ue *UsageError
+	if !errors.As(err, &ue) {
+		t.Fatalf("expected UsageError when required flag is missing, got %v", err)
+	}
+}
+
+func TestRequiredFlagOnlyOnRootStillEnforced(t *testing.T) {
+	app := &Command{
+		Name:  "demo",
+		Flags: []Flag{&StringFlag{Name: "token", Required: true}},
+		Subcommands: []*Command{{
+			Name:   "run",
+			Action: func(ctx context.Context, in *Input, out *Output) error { return nil },
+		}},
+	}
+	_, _, err := runApp(app, "run")
+	var ue *UsageError
+	if !errors.As(err, &ue) {
+		t.Fatalf("expected UsageError from root required flag, got %v", err)
+	}
+}
+
+func TestHelpAndVersionBypassRequiredFlags(t *testing.T) {
+	app := New()
+	app.Name = "prog"
+	app.Version = "9.9.9"
+	app.Flags = []Flag{&StringFlag{Name: "token", Required: true}}
+	app.Subcommands = []*Command{{Name: "sub", Action: func(context.Context, *Input, *Output) error { return nil }}}
+
+	stdout, _, err := runApp(app, "help")
+	if err != nil {
+		t.Fatalf("help should bypass required flags: %v", err)
+	}
+	if !strings.Contains(stdout, "COMMANDS:") {
+		t.Errorf("help output missing:\n%s", stdout)
+	}
+
+	stdout, _, err = runApp(app, "version")
+	if err != nil {
+		t.Fatalf("version should bypass required flags: %v", err)
+	}
+	if !strings.Contains(stdout, "9.9.9") {
+		t.Errorf("version output missing:\n%s", stdout)
+	}
+
+	if _, _, err = runApp(app, "sub", "--help"); err != nil {
+		t.Fatalf("subcommand help should bypass required flags: %v", err)
+	}
+
+	if _, _, err = runApp(app, "missing"); err == nil {
+		t.Fatal("expected NotFoundError for an unknown command")
+	} else {
+		var nf *NotFoundError
+		if !errors.As(err, &nf) {
+			t.Errorf("expected NotFoundError, got %v", err)
+		}
+	}
+}
+
+func TestSubcommandHelpListsGlobalOptions(t *testing.T) {
+	app := New()
+	app.Name = "prog"
+	app.Subcommands = []*Command{{
+		Name:   "run",
+		Flags:  []Flag{&StringFlag{Name: "opt", Usage: "an option"}},
+		Action: func(context.Context, *Input, *Output) error { return nil },
+	}}
+	stdout, _, err := runApp(app, "run", "--help")
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	for _, want := range []string{"OPTIONS:", "--opt", "--help, -h", "GLOBAL OPTIONS:", "--verbose", "--quiet", "--no-interaction"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("subcommand help missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestOutputStateResetsBetweenRuns(t *testing.T) {
+	app := New()
+	app.Name = "prog"
+	app.Stdin = strings.NewReader("")
+	app.Action = func(context.Context, *Input, *Output) error { return nil }
+	o, _, _ := captureApp(app)
+
+	if err := app.Run(context.Background(), []string{"prog", "--verbose", "--no-interaction"}); err != nil {
+		t.Fatalf("first run failed: %v", err)
+	}
+	if o.GetVerbosity() != VerbosityDebug {
+		t.Errorf("verbosity = %d, want debug", o.GetVerbosity())
+	}
+	if o.isInteractive() {
+		t.Error("interaction should be disabled by --no-interaction")
+	}
+
+	if err := app.Run(context.Background(), []string{"prog"}); err != nil {
+		t.Fatalf("second run failed: %v", err)
+	}
+	if o.GetVerbosity() != VerbosityNormal {
+		t.Errorf("verbosity after second run = %d, want normal", o.GetVerbosity())
+	}
+	if !o.isInteractive() {
+		t.Error("interaction should be restored on the next invocation")
+	}
+}
+
+func TestGlobalFlagsBeforeSubcommand(t *testing.T) {
+	app := New()
+	app.Name = "prog"
+	app.Subcommands = []*Command{{
+		Name: "run",
+		Action: func(ctx context.Context, in *Input, out *Output) error {
+			out.Debug("debug line")
+			return nil
+		},
+	}}
+
+	stdout, _, err := runApp(app, "--verbose", "run")
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if !strings.Contains(stdout, "debug line") {
+		t.Errorf("--verbose before subcommand not applied:\n%s", stdout)
+	}
+
+	stdout, _, err = runApp(app, "run")
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if strings.Contains(stdout, "debug line") {
+		t.Errorf("debug output should be off without --verbose:\n%s", stdout)
+	}
+}

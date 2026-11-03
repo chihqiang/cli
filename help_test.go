@@ -125,8 +125,8 @@ func TestShowHelpSubcommandNoFlagsSection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if strings.Contains(stdout, "OPTIONS:") {
-		t.Errorf("should not show OPTIONS section without flags:\n%s", stdout)
+	if strings.Contains(stdout, "\nOPTIONS:") {
+		t.Errorf("should not show a local OPTIONS section without flags:\n%s", stdout)
 	}
 }
 

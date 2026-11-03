@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"flag"
+	"fmt"
 	"io"
 	"os"
 
@@ -80,13 +81,18 @@ func (c *Command) Run(ctx context.Context, args []string) error {
 func (c *Command) run(ctx context.Context, args []string) error {
 	if c.app == nil {
 		c.app = c
-		// Non-terminal input defaults to non-interactive; an explicitly injected
-		// Stdin is treated as intentional interaction (for testing and embedding).
+		c.setupGlobalFlags()
+	}
+	out := c.output()
+	if c.app == c {
+		// Recompute terminal detection on every invocation so a late-injected Stdin is
+		// honored, and reset per-invocation output state on a reused App.
 		c.interactive = term.IsTerminal(int(os.Stdin.Fd()))
 		if c.Stdin != nil {
 			c.interactive = true
 		}
-		c.setupGlobalFlags()
+		out.SetVerbosity(VerbosityNormal)
+		out.noInteraction = false
 	}
 
 	rest, err := c.parse(args)
@@ -94,15 +100,16 @@ func (c *Command) run(ctx context.Context, args []string) error {
 		return err
 	}
 
-	// Set the shared output level based on the global verbose/quiet flags (after root parse).
-	if c.app == c {
-		out := c.output()
-		if bv, ok := c.app.values["verbose"].(*boolValue); ok && bv.val {
-			out.SetVerbosity(VerbosityDebug)
-		}
-		if bv, ok := c.app.values["quiet"].(*boolValue); ok && bv.val {
-			out.SetVerbosity(VerbosityQuiet)
-		}
+	// The shared output level reflects --verbose/--quiet from any command in the chain,
+	// so global flags also work after the subcommand name.
+	if bv, ok := c.values["verbose"].(*boolValue); ok && bv.val {
+		out.SetVerbosity(VerbosityDebug)
+	}
+	if bv, ok := c.values["quiet"].(*boolValue); ok && bv.val {
+		out.SetVerbosity(VerbosityQuiet)
+	}
+	if bv, ok := c.values["no-interaction"].(*boolValue); ok && bv.val {
+		out.noInteraction = true
 	}
 
 	if c.helpValue != nil && c.helpValue.val {
@@ -111,6 +118,21 @@ func (c *Command) run(ctx context.Context, args []string) error {
 	if c.versionValue != nil && c.versionValue.val {
 		c.printVersion(ctx, c.newInput(rest))
 		return nil
+	}
+
+	// A subcommand (or a builtin help/version/not-found path) may handle this invocation.
+	// In that case required flags are validated by the command that finally runs an Action,
+	// after the whole chain has been parsed, so flags supplied after the subcommand name
+	// count and help/version are never blocked by required flags.
+	dispatch := len(rest) > 0 && len(c.Subcommands) > 0
+	var sub *Command
+	if dispatch {
+		sub = c.findSubcommand(rest[0])
+	}
+	if c.Action != nil && !(dispatch && (sub != nil || c.app == c)) {
+		if err := c.validateRequired(); err != nil {
+			return err
+		}
 	}
 
 	// Global (root) Before hook; runs only once for the whole invocation.
@@ -123,8 +145,8 @@ func (c *Command) run(ctx context.Context, args []string) error {
 	}
 
 	// Subcommand dispatch (rest[0] is treated as a command name only when subcommands are declared).
-	if len(rest) > 0 && len(c.Subcommands) > 0 {
-		if sub := c.findSubcommand(rest[0]); sub != nil {
+	if dispatch {
+		if sub != nil {
 			sub.app = c.app
 			sub.parent = c
 			return c.finish(ctx, rest, sub.run(ctx, rest[1:]))
@@ -265,14 +287,37 @@ func (c *Command) setupGlobalFlags() {
 	}
 }
 
-// allFlags returns the merged list of the command's own flags and the global builtin flags.
+// allFlags returns the merged list of the command's own flags and the global builtin
+// flags. Subcommands inherit the root's builtin flags so --verbose / --quiet /
+// --no-interaction also work after the subcommand name. A user flag with the same
+// name shadows the inherited builtin.
 func (c *Command) allFlags() []Flag {
-	if c.app != c {
-		return c.Flags
-	}
 	out := make([]Flag, 0, len(c.Flags)+len(c.builtinFlags))
 	out = append(out, c.Flags...)
-	out = append(out, c.builtinFlags...)
+	if c.app != nil && c.app != c {
+		return append(out, c.inheritedGlobalFlags()...)
+	}
+	for _, f := range c.builtinFlags {
+		if c.hasFlag(f.Names()[0]) {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// inheritedGlobalFlags returns the root's global builtin flags that this command
+// accepts but does not define itself.
+func (c *Command) inheritedGlobalFlags() []Flag {
+	if c.app == nil || c.app == c {
+		return nil
+	}
+	out := make([]Flag, 0, len(c.app.builtinFlags))
+	for _, f := range c.app.builtinFlags {
+		if !c.hasFlag(f.Names()[0]) {
+			out = append(out, f)
+		}
+	}
 	return out
 }
 
@@ -351,7 +396,9 @@ func (c *Command) parse(args []string) ([]string, error) {
 		}
 		if v, ok := src.Lookup(); ok {
 			if def, ok := defs[f.Names()[0]]; ok {
-				_ = def.value.Set(v)
+				if err := def.value.Set(v); err != nil {
+					return nil, &UsageError{Msg: fmt.Sprintf("invalid value %q for flag -%s: %v", v, f.Names()[0], err)}
+				}
 				for _, n := range f.Names() {
 					c.setFlags[n] = true
 					c.sourceFlags[n] = true
@@ -360,18 +407,65 @@ func (c *Command) parse(args []string) ([]string, error) {
 		}
 	}
 
-	// Required flag validation (skipped for --help/--version so help is not blocked by required flags).
-	skipRequired := (c.helpValue != nil && c.helpValue.val) ||
-		(c.versionValue != nil && c.versionValue.val)
-	if !skipRequired {
-		for _, f := range c.allFlags() {
-			if f.IsRequired() && !c.flagSetAny(f.Names()) {
-				return nil, &UsageError{Msg: "Required flag \"" + f.Names()[0] + "\" not set"}
-			}
-		}
+	// Validate typed flag values (e.g. reject --count abc instead of silently reading 0).
+	if err := c.validateFlagValues(); err != nil {
+		return nil, err
 	}
 
 	return rest, nil
+}
+
+// validateFlagValues checks values supplied on the command line or by a value source
+// against their flag type.
+func (c *Command) validateFlagValues() error {
+	for _, f := range c.allFlags() {
+		if !c.flagSetAny(f.Names()) {
+			continue
+		}
+		for _, raw := range rawFlagValues(c.values[f.Names()[0]]) {
+			if err := f.validateValue(raw); err != nil {
+				return &UsageError{Msg: fmt.Sprintf("invalid value %q for flag -%s: %v", raw, f.Names()[0], err)}
+			}
+		}
+	}
+	return nil
+}
+
+// rawFlagValues returns the textual values held by a flag's runtime value.
+func rawFlagValues(v interface{}) []string {
+	switch t := v.(type) {
+	case *singleValue:
+		return []string{t.val}
+	case *sliceValue:
+		return t.vals
+	}
+	return nil
+}
+
+// validateRequired verifies required flags across the command chain. It runs on the
+// command whose Action is about to execute, after every command in the chain has been
+// parsed, so a required flag declared on both a parent and a subcommand is satisfied by
+// a value supplied at either position.
+func (c *Command) validateRequired() error {
+	for cmd := c; cmd != nil; cmd = cmd.parent {
+		for _, f := range cmd.allFlags() {
+			if !f.IsRequired() || c.flagSetAnyChain(f.Names()) {
+				continue
+			}
+			return &UsageError{Msg: "Required flag \"" + f.Names()[0] + "\" not set"}
+		}
+	}
+	return nil
+}
+
+// flagSetAnyChain reports whether any command in the chain explicitly set one of names.
+func (c *Command) flagSetAnyChain(names []string) bool {
+	for cmd := c; cmd != nil; cmd = cmd.parent {
+		if cmd.flagSetAny(names) {
+			return true
+		}
+	}
+	return false
 }
 
 // flagSetAny reports whether any flag in names was explicitly set.

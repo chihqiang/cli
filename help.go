@@ -125,7 +125,14 @@ func (c *Command) renderCommandHelp(out *Output) error {
 	if len(c.Flags) > 0 {
 		out.rawf("")
 		out.rawf("OPTIONS:")
-		c.renderFlags(out, c.Flags, false)
+		flags := append([]Flag{&BoolFlag{Name: "help", Aliases: []string{"h"}, Usage: "show help"}}, c.Flags...)
+		c.renderFlags(out, flags, false)
+	}
+
+	if globals := c.inheritedGlobalFlags(); len(globals) > 0 {
+		out.rawf("")
+		out.rawf("GLOBAL OPTIONS:")
+		c.renderFlags(out, globals, false)
 	}
 
 	return nil

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"strings"
 	"testing"
@@ -386,5 +387,129 @@ func TestFlagSourceAliasesMarkedSet(t *testing.T) {
 	}
 	if !setByName || !setByAlias {
 		t.Errorf("IsSet by name = %v, by alias = %v; want both true", setByName, setByAlias)
+	}
+}
+
+func TestTypedFlagsRejectInvalidValues(t *testing.T) {
+	tests := []struct {
+		name string
+		flag Flag
+		args []string
+	}{
+		{"int", &IntFlag{Name: "n"}, []string{"--n", "abc"}},
+		{"int64", &Int64Flag{Name: "n"}, []string{"--n", "abc"}},
+		{"uint", &UintFlag{Name: "n"}, []string{"--n", "-1"}},
+		{"float64", &Float64Flag{Name: "n"}, []string{"--n", "xyz"}},
+		{"duration", &DurationFlag{Name: "n"}, []string{"--n", "soon"}},
+		{"int slice", &IntSliceFlag{Name: "n"}, []string{"--n", "1,abc"}},
+		{"float slice", &Float64SliceFlag{Name: "n"}, []string{"--n", "1.5,abc"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := New()
+			app.Name = "prog"
+			app.Flags = []Flag{tt.flag}
+			app.Action = func(context.Context, *Input, *Output) error { return nil }
+			_, _, err := runApp(app, tt.args...)
+			var ue *UsageError
+			if !errors.As(err, &ue) {
+				t.Fatalf("expected UsageError, got %v", err)
+			}
+		})
+	}
+}
+
+func TestTypedFlagsAcceptValidValues(t *testing.T) {
+	app := New()
+	app.Name = "prog"
+	app.Flags = []Flag{
+		&IntFlag{Name: "count"},
+		&Float64Flag{Name: "ratio"},
+		&DurationFlag{Name: "timeout"},
+		&IntSliceFlag{Name: "ports"},
+	}
+	var count, ports int
+	var ratio float64
+	var timeout time.Duration
+	app.Action = func(ctx context.Context, in *Input, out *Output) error {
+		count = in.Int("count")
+		ratio = in.Float64("ratio")
+		timeout = in.Duration("timeout")
+		ports = len(in.IntSlice("ports"))
+		return nil
+	}
+	if _, _, err := runApp(app, "--count", "3", "--ratio", "1.5", "--timeout", "2s", "--ports", "80,443"); err != nil {
+		t.Fatalf("valid values rejected: %v", err)
+	}
+	if count != 3 || ratio != 1.5 || timeout != 2*time.Second || ports != 2 {
+		t.Errorf("parsed values = %d, %v, %v, %d", count, ratio, timeout, ports)
+	}
+}
+
+func TestValueSourceValidatesTypedValues(t *testing.T) {
+	t.Setenv("CLI_TEST_COUNT", "nope")
+	app := New()
+	app.Name = "prog"
+	app.Flags = []Flag{&IntFlag{Name: "count", Sources: EnvVars("CLI_TEST_COUNT")}}
+	app.Action = func(context.Context, *Input, *Output) error { return nil }
+	_, _, err := runApp(app)
+	var ue *UsageError
+	if !errors.As(err, &ue) {
+		t.Fatalf("expected UsageError from invalid env value, got %v", err)
+	}
+}
+
+func TestRequiredFlagSatisfiedByValueSourceOnSubcommand(t *testing.T) {
+	t.Setenv("CLI_TEST_TOKEN", "from-env")
+	app := New()
+	app.Name = "prog"
+	app.Subcommands = []*Command{{
+		Name:  "run",
+		Flags: []Flag{&StringFlag{Name: "token", Required: true, Sources: EnvVars("CLI_TEST_TOKEN")}},
+		Action: func(ctx context.Context, in *Input, out *Output) error {
+			if got := in.String("token"); got != "from-env" {
+				t.Errorf("token = %q", got)
+			}
+			return nil
+		},
+	}}
+	if _, _, err := runApp(app, "run"); err != nil {
+		t.Fatalf("required flag should be satisfied by its source: %v", err)
+	}
+}
+
+func TestLocalFlagShadowsInheritedGlobalFlag(t *testing.T) {
+	app := New()
+	app.Name = "prog"
+	app.Subcommands = []*Command{{
+		Name:  "run",
+		Flags: []Flag{&StringFlag{Name: "quiet", Usage: "local quiet flag"}},
+		Action: func(ctx context.Context, in *Input, out *Output) error {
+			out.Info("still visible")
+			if got := in.String("quiet"); got != "local" {
+				t.Errorf("quiet = %q, want local flag value", got)
+			}
+			return nil
+		},
+	}}
+	stdout, _, err := runApp(app, "run", "--quiet", "local")
+	if err != nil {
+		t.Fatalf("local flag should shadow the inherited global: %v", err)
+	}
+	if !strings.Contains(stdout, "still visible") {
+		t.Errorf("local --quiet should not change verbosity:\n%s", stdout)
+	}
+}
+
+func TestValueSourceInvalidBoolRejected(t *testing.T) {
+	t.Setenv("CLI_TEST_FORCE", "yes")
+	app := New()
+	app.Name = "prog"
+	app.Flags = []Flag{&BoolFlag{Name: "force", Sources: EnvVars("CLI_TEST_FORCE")}}
+	app.Action = func(context.Context, *Input, *Output) error { return nil }
+	_, _, err := runApp(app)
+	var ue *UsageError
+	if !errors.As(err, &ue) {
+		t.Fatalf("expected UsageError from invalid bool env value, got %v", err)
 	}
 }
